@@ -1,13 +1,22 @@
 import spacy
 import random
+import spacy
+import subprocess
+import sys
 
 class QuestionGenerator:
     def __init__(self):
-        # Load spaCy model as requested - strictly no download logic
         try:
             self.nlp = spacy.load("en_core_web_sm")
         except OSError:
-            raise RuntimeError("Model 'en_core_web_sm' not found. Please check requirements.txt.")
+            subprocess.check_call([
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "en_core_web_sm==3.7.1"
+            ])
+            self.nlp = spacy.load("en_core_web_sm")
 
         # Question Bank with expected keywords for evaluation
         self.question_bank = {
