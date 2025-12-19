@@ -1,132 +1,135 @@
 import streamlit as st
+import pandas as pd
 from question_generator import QuestionGenerator
 from answer_evaluator import AnswerEvaluator
-import pandas as pd
 
-# Page config
-st.set_page_config(page_title="AI Interviewer", layout="wide")
+# Page Configuration
+st.set_page_config(
+    page_title="AI Technical Interviewer",
+    page_icon="🤖",
+    layout="centered"
+)
 
-# Custom CSS for UI
+# Custom CSS for aesthetics
 st.markdown("""
     <style>
     .main {
-        background-color: #f5f5f5;
+        background-color: #f9f9f9;
     }
     .stTextArea textarea {
-        background-color: #ffffff;
+        background-color: #000000;
+        border: 1px solid #ddd;
     }
-    .score-card {
-        padding: 10px;
-        border-radius: 5px;
-        margin-bottom: 10px;
+    h1 {
+        color: #2c3e50;
     }
-    .good { background-color: #d4edda; color: #155724; }
-    .average { background-color: #fff3cd; color: #856404; }
-    .poor { background-color: #f8d7da; color: #721c24; }
+    .question-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# Title
-st.title("🤖 AI Interviewer")
-st.markdown("### NLP Based Interview Question Generator and Answer Evaluator")
+def main():
+    st.title("🤖 AI Technical Interviewer")
+    st.caption("Practice your technical interview skills with AI analysis.")
 
-# Initialize modules (cached to avoid reload)
-@st.cache_resource
-def get_generator():
-    return QuestionGenerator()
+    # Initialize Logic Classes
+    try:
+        # Lazy initialization to avoid reloading models on every rerun if possible
+        # but Streamlit runs top-down. Storing in session_state works.
+        if 'generator' not in st.session_state:
+            with st.spinner("Loading AI Models..."):
+                st.session_state.generator = QuestionGenerator()
+                st.session_state.evaluator = AnswerEvaluator()
+                st.success("Models Loaded Successfully!")
+    except RuntimeError as e:
+        st.error(f"System Error: {e}")
+        st.info("Please ensure 'requirements.txt' contains the correct spaCy model URL.")
+        st.stop()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        st.stop()
 
-@st.cache_resource
-def get_evaluator():
-    return AnswerEvaluator()
-
-generator = get_generator()
-evaluator = get_evaluator()
-
-# Session State for Questions and Answers
-if 'questions' not in st.session_state:
-    st.session_state['questions'] = []
-if 'answers' not in st.session_state:
-    st.session_state['answers'] = {}
-if 'submitted' not in st.session_state:
-    st.session_state['submitted'] = False
-
-# Sidebar or Input Section
-with st.container():
-    st.subheader("1. Job Description")
-    jd_input = st.text_area("Paste the Job Description here:", height=150, placeholder="e.g. We are looking for a Data Scientist proficient in Python, SQL, and Machine Learning...")
-    
-    if st.button("Generate Interview Questions"):
-        if jd_input.strip():
-            with st.spinner("Extracting keywords and generating questions..."):
-                questions = generator.generate_questions(jd_input)
-                st.session_state['questions'] = questions
-                st.session_state['answers'] = {i: "" for i in range(len(questions))}
-                st.session_state['submitted'] = False
-            st.success(f"Generated {len(questions)} questions based on the JD!")
-        else:
-            st.warning("Please enter a Job Description first.")
-
-# Question & Answer Section
-if st.session_state['questions']:
-    st.subheader("2. Interview Session")
-    
-    with st.form("interview_form"):
-        for i, item in enumerate(st.session_state['questions']):
-            st.markdown(f"**Q{i+1}: {item['question']}**")
-            st.session_state['answers'][i] = st.text_area(f"Your Answer for Q{i+1}", key=f"ans_{i}", height=100)
-            st.markdown("---")
+    # Sidebar - Configuration
+    with st.sidebar:
+        st.header("Settings")
+        role = st.selectbox(
+            "Select Interview Role",
+            ["Python Developer", "React Frontend", "Machine Learning Engineer", "General Developer"]
+        )
+        num_questions = st.slider("Number of Questions", 1, 5, 3)
         
-        submit_button = st.form_submit_button("Submit Answers")
-        
-        if submit_button:
-            st.session_state['submitted'] = True
+        if st.button("Start New Interview"):
+            # Generate new questions and reset state
+            st.session_state.questions = st.session_state.generator.generate_questions(role, num_questions)
+            st.session_state.answers = {} # Reset answers
+            st.session_state.evaluated = False
+            st.session_state.current_role = role
+            st.rerun()
 
-# Evaluation Section
-if st.session_state['submitted']:
-    st.subheader("3. Evaluation Report")
-    
-    total_score = 0
-    max_score = len(st.session_state['questions']) * 10
-    results_data = []
-
-    for i, item in enumerate(st.session_state['questions']):
-        user_ans = st.session_state['answers'].get(i, "")
-        result = evaluator.evaluate_answer(item['question'], item['keyword'], user_ans)
-        
-        score = result['score']
-        feedback = result['feedback']
-        total_score += score
-        
-        # Determine CSS class for styling
-        status_class = "poor"
-        if score >= 8: status_class = "good"
-        elif score >= 5: status_class = "average"
-        
-        st.markdown(f"""
-        <div class="score-card {status_class}">
-            <h4>Q{i+1}: {item['question']}</h4>
-            <p><b>Your Answer:</b> {user_ans}</p>
-            <p><b>Score:</b> {score}/10 | <b>Feedback:</b> {feedback}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        results_data.append([item['question'], user_ans, score, feedback])
-
-    # Final Summary
-    st.markdown("### Performance Summary")
-    percentage = (total_score / max_score) * 100
-    st.metric("Total Score", f"{total_score}/{max_score}", f"{percentage:.1f}%")
-    
-    if percentage >= 80:
-        st.balloons()
-        st.success("Result: Excellent! You are a strong candidate.")
-    elif percentage >= 50:
-        st.info("Result: Average. Good foundation but needs polish.")
+    # Main Interview Logic
+    if 'questions' not in st.session_state:
+        st.info("👈 Please select a role and click 'Start New Interview' to begin.")
     else:
-        st.error("Result: Needs Improvement. Focus more on key concepts.")
+        st.subheader(f"Role: {st.session_state.get('current_role', role)}")
+        
+        with st.form("interview_form"):
+            user_inputs = {}
+            for i, q_data in enumerate(st.session_state.questions):
+                st.markdown(f"### Q{i+1}: {q_data['question']}")
+                # Use a unique key for each text area
+                user_inputs[i] = st.text_area(
+                    "Your Answer:", 
+                    key=f"q_{i}", 
+                    height=100,
+                    placeholder="Type your explanation here..."
+                )
+            
+            submitted = st.form_submit_button("Submit & Evaluate")
+            
+            if submitted:
+                st.session_state.answers = user_inputs
+                st.session_state.evaluated = True
 
-    # Download Results
-    df = pd.DataFrame(results_data, columns=["Question", "Answer", "Score", "Feedback"])
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("Download Report Results CSV", csv, "interview_report.csv", "text/csv")
-
+        # Evaluation Results
+        if st.session_state.get('evaluated', False):
+            st.divider()
+            st.header("📝 Evaluation Report")
+            
+            total_score = 0
+            
+            for i, q_data in enumerate(st.session_state.questions):
+                user_ans = st.session_state.answers.get(i, "")
+                score, feedback, missing = st.session_state.evaluator.evaluate_answer(
+                    user_ans, 
+                    q_data['keywords']
+                )
+                total_score += score
+                
+                with st.expander(f"Result for Q{i+1} (Score: {score:.0f}/100)"):
+                    st.write(f"**Question:** {q_data['question']}")
+                    st.write(f"**Your Answer:** {user_ans if user_ans else '*(No Answer)*'}")
+                    
+                    if score > 70:
+                        st.success(feedback)
+                    elif score > 40:
+                        st.warning(feedback)
+                    else:
+                        st.error(feedback)
+                        
+                    if missing:
+                        st.write("**Keywords missed:**")
+                        st.caption(", ".join(missing))
+            
+            avg_score = total_score / len(st.session_state.questions)
+            st.metric("Overall Interview Score", f"{avg_score:.1f} / 100")
+            
+            if avg_score > 80:
+                st.balloons()
+            
+if __name__ == "__main__":
+    main()

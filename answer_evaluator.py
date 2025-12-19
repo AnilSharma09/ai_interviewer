@@ -1,66 +1,67 @@
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
+import spacy
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import warnings
+
+# Suppress warnings for simple NLP tasks
+warnings.filterwarnings("ignore")
 
 class AnswerEvaluator:
     def __init__(self):
-        # Load a lightweight model for semantic similarity
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Load spaCy model strictly matching requirements
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            raise RuntimeError("Model 'en_core_web_sm' is missing. Ensure it is installed via requirements.txt.")
 
-    def evaluate_answer(self, question, keyword, user_answer):
+    def evaluate_answer(self, user_answer, keywords):
         """
-        Evaluates the user's answer against a generated 'ideal' context 
-        derived from the keyword and question.
-        Returns a score (0-10) and feedback.
+        Evaluates the user's answer based on keyword coverage and semantic similarity.
+        Returns a score (0-100) and feedback text.
         """
-        if not user_answer or len(user_answer.strip()) < 5:
-            return {
-                "score": 0,
-                "feedback": "Answer is too short or empty."
-            }
+        if not user_answer or not user_answer.strip():
+            return 0, "No answer provided.", []
 
-        # Construct a synthetic ideal answer for comparison
-        # Since we don't have a generative LLM, we use the keyword context as the anchor
-        # A good answer should be semantically close to the context of the keyword being discussed in a positive/technical light.
-        ideal_anchor = f"{keyword} is a key technology/concept. It involves {keyword} features and implementation details."
+        # 1. NLP Processing - Lemmatization
+        doc_answer = self.nlp(user_answer.lower())
+        lemmatized_answer_tokens = {token.lemma_ for token in doc_answer if not token.is_stop and not token.is_punct}
         
-        # We also compare against the question itself to ensure relevance
-        # Embedding
-        embeddings = self.model.encode([user_answer, ideal_anchor, question])
+        # 2. Keyword Matching (Score Component 1)
+        # Convert keywords to lemmas to match variations (e.g., "modification" -> "modify")
+        lemmatized_keywords = set()
+        for kw in keywords:
+            kw_doc = self.nlp(kw.lower())
+            for token in kw_doc:
+                lemmatized_keywords.add(token.lemma_)
         
-        # Similarity with ideal anchor
-        sim_ideal = util.pytorch_cos_sim(embeddings[0], embeddings[1]).item()
+        matched_keywords = lemmatized_keywords.intersection(lemmatized_answer_tokens)
+        match_count = len(matched_keywords)
+        total_keywords = len(lemmatized_keywords)
         
-        # Similarity with question (should be somewhat related, but not too high, we want an *answer* not a repeat)
-        # Actually, let's focus on the keyword relevance.
+        keyword_score = (match_count / total_keywords) * 100 if total_keywords > 0 else 0
         
-        # Heuristic scoring
-        # 1. Keyword overlap (simple check)
-        keyword_present = keyword.lower() in user_answer.lower()
+        # 3. Use spaCy similarity (Score Component 2)
+        # Create a document from keywords to compare against answer
+        doc_keywords = self.nlp(" ".join(keywords))
         
-        # 2. Semantic Score (0.0 to 1.0) -> Scale to 10
-        # Enhancing the anchor to be more robust
-        similarity_score = max(0, sim_ideal) * 10 
+        # Note: en_core_web_sm doesn't have static vectors, so this uses context tensors.
+        # It's good enough for basic context estimation.
+        similarity_score = doc_answer.similarity(doc_keywords) * 100
         
-        # Boost score if keyword is explicitly mentioned
-        if keyword_present:
-            similarity_score += 2
+        # 4. Final Weighted Score
+        # Give more weight to explicit keyword matches
+        final_score = (0.7 * keyword_score) + (0.3 * similarity_score)
+        final_score = min(100, max(0, final_score)) # Clamp
         
-        # Clamping
-        final_score = min(10, max(0, int(similarity_score)))
+        # Generate Feedback
+        missing_keywords = list(lemmatized_keywords - matched_keywords)
         
-        # Feedback generation
-        if final_score >= 8:
-            feedback = "Excellent! Your answer is relevant and covers the key concepts."
-        elif final_score >= 5:
-            feedback = "Good. You touched on the topic, but more detail would improve the answer."
+        feedback = f"Relevance Score: {final_score:.1f}/100."
+        if final_score > 80:
+            feedback += " Excellent answer! You covered the key concepts."
+        elif final_score > 50:
+            feedback += " Good attempt. Try to include more specific terminology."
         else:
-            feedback = "Needs Improvement. The answer seems vague or off-topic."
+            feedback += " Your answer seems a bit off or too brief."
 
-        return {
-            "score": final_score,
-            "feedback": feedback
-        }
-
-if __name__ == "__main__":
-    evaluator = AnswerEvaluator()
-    print(evaluator.evaluate_answer("Explain Python", "Python", "Python is a high-level programming language."))
+        return final_score, feedback, missing_keywords
