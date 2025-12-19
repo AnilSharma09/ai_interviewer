@@ -3,20 +3,13 @@ import random
 import spacy
 import subprocess
 import sys
+import spacy
+import os
 
 class QuestionGenerator:
     def __init__(self):
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            subprocess.check_call([
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "en_core_web_sm==3.7.1"
-            ])
-            self.nlp = spacy.load("en_core_web_sm")
+        model_path = os.path.join(os.path.dirname(__file__), "en_core_web_sm")
+        self.nlp = spacy.load(model_path)
 
         # Question Bank with expected keywords for evaluation
         self.question_bank = {
