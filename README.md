@@ -2,7 +2,7 @@
 
 An AI-powered interview assistant that automates the first round of technical interviews by analyzing a Job Description (JD), generating relevant interview questions, and evaluating candidate responses using Natural Language Processing (NLP) and semantic similarity.
 
----
+----
 
 ## 📌 Overview
 
